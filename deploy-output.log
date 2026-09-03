@@ -1,0 +1,14 @@
+=== CRM Deployment Started === 
+Current directory: C:\Users\gipps\Downloads\stage-9.5-main\stage-9.5-main 
+ 
+Removing old .git folder... 
+Done removing old .git. 
+ 
+Step 1: git init 
+Initialized empty Git repository in C:/Users/gipps/Downloads/stage-9.5-main/stage-9.5-main/.git/
+Exit code: 0 
+ 
+Step 2: git config user 
+Done configuring user. 
+ 
+Step 3: git add . 

@@ -1,0 +1,34 @@
+{
+  "summary": "Stage 6A auth wiring tested end-to-end via Playwright against the public preview URL. All 14 requested behaviors verified: unauthenticated redirect to /login (from /, /reservations, /admin/users), login page testids present, invalid creds show login-error and stay on /login, valid admin login lands on / with sidebar-profile (name/email/admin role badge), session persists across reload via localStorage 'sb_token', admin sees all 4 admin nav items (nav-admin-users + 3 nav-settings-*), /admin/users renders the seeded admin row, create new manager user via add-user-button + new-name/new-email/new-password/new-role(manager)/save-user works and the new row appears in users-table-body, active-<uid> Switch can deactivate then re-activate the non-self user, the admin's own row has no delete-<uid> button and the active-<uid> switch is disabled (data-disabled set), delete-<uid> removes the row after confirm dialog, logout-button clears sb_token and returns to /login and a subsequent visit to / re-redirects to /login, login as the newly created manager hides ALL admin/settings nav, direct visit to /admin/users renders data-testid='forbidden', and operational pages (/reservations,/segments,/reports) remain reachable for managers. Regression: all 13 admin-accessible pages loaded with no console errors (only benign recharts width/height warnings). Backend smoke: /api/auth/login returns 200+JWT for valid creds, 401 for bad creds; /api/auth/me and /api/users return 401 without token. Test manager user was deleted in cleanup so only the seed admin persists.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AnalyticsDashboard", "issues": ["Recharts emits 'width(-1) and height(-1) of chart should be greater than 0' warnings repeatedly on mount/route-change — likely a ResponsiveContainer parent that briefly has 0 height. Cosmetic, no functional impact, but noisy in the console."]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_7.json"],
+  "action_items": [
+    "Optional: silence Recharts width/height warnings on Dashboard by giving ResponsiveContainer parents an explicit min-height (e.g., h-64) so the initial measure is > 0."
+  ],
+  "critical_code_review_comments": [
+    "AuthContext.jsx: clean — token kept in localStorage 'sb_token', axios default Authorization header synced via effect, /auth/me restores session on mount, 401 clears state. Good.",
+    "ProtectedRoute.jsx: correctly distinguishes loading (user===undefined) vs unauthenticated (user===null) vs role mismatch (renders data-testid='forbidden').",
+    "Layout.jsx: NAV/ADMIN_NAV declaratively gated by role via hasRole(); sidebar-profile and logout-button present on desktop; mobile m-logout-button mirrors it. Logout uses navigate('/login', {replace:true}).",
+    "AdminUsers.jsx: 'you' row correctly hides the delete button and disables role-select & active-switch via `disabled={u.id === me?.id}`. window.confirm/window.prompt UX is functional but consider a shadcn dialog for consistency with the rest of the app (non-blocking).",
+    "Login.jsx: lowercases email on submit (good — matches backend normalization), shows login-error from response.data.detail.",
+    "Security note (out of Stage 6A scope, flagged for awareness): only /api/auth/* and /api/users are auth-gated server-side; all other endpoints remain open per the problem statement. Stage 6B+ should add the JWT dependency to the operational routers."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@sourcebench.local / ChangeMe123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Created and then deleted a temporary manager user (test_mgr_<ts>@sourcebench.local) for the role-restriction test. Cleanup verified — only the seed admin remains.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Stage 6A auth is fully wired and verified on the frontend. Backend smoke for /api/auth/* and /api/users (CRUD) all green. When Stage 6B begins, expect role-gating to extend to operational endpoints — re-test those /api endpoints with both admin and manager tokens. The Playwright flow used in this iteration (login -> create user -> toggle active -> delete -> logout -> re-login as the new user) is a solid base; just regenerate a unique TEST_EMAIL per run.",
+  "rca of the issue": "No defects found. One script-level false-negative in step 4 (post-login URL equality assertion) was a Playwright timing edge — every dependent step (5-15) ran successfully as the admin afterwards, conclusively proving the login flow works."
+}

@@ -1,0 +1,46 @@
+{
+  "summary": "Stage 6B (Tasks + Property extensions) verified end-to-end against the public preview URL. Backend pytest suite (16 tests) covering /api/tasks/meta + /api/tasks/stats (auth-gated, correct vocabulary lengths 8/4/4 + mine_open key), POST/GET/PUT/DELETE /api/tasks (incl. status='done' completed_at/by, priority/due updates), GET filters (status/category/priority/property_id/assignee_id/mine each independently), checklist add/toggle (done_at/done_by) /delete, comments (user_id/user_name/body/created_at), photos accept tiny PNG data-url, reject non-image (400), reject oversized >1.6MB (413), 12-photo cap (13th=400), photo delete, RBAC (manager full create/update/delete, staff list returns only their property tasks + tasks assigned to them, staff POST=403, staff PUT status on unassigned=403, on assigned=200, staff PUT title=403), Properties extended fields round-trip (address/key_collection_notes/wifi_name/wifi_password/parking_notes/smart_lock_code/max_occupancy/checkin_time/checkout_time + nested ota_listings with all 5 urls), PUT subset persists, /users/assignable open to admin+manager+staff with safe fields only (no password_hash). All 16 backend tests PASS. Frontend Playwright verified: /tasks page renders tasks-page, full stat strip (stat-total/stat-open/stat-progress/stat-blocked/stat-overdue/stat-mine), all filter-* + status-tab-* testids, new-task-button (admin), create-modal flow with title/description/category=maintenance/priority=high/property/2 checklist steps -> modal closes, row appears in tasks-table-body, drawer auto-opens, status-flip-{in_progress,blocked,done} all work, drawer-edit-meta -> drawer-edit-form -> drawer-description-input -> drawer-save-meta persists description (verified Saved toast + drawer-description rendered new value), checklist add via checklist-new-input/submit, toggle, remove; comment-input/submit creates comment-{id}; filter-search narrows list, filter-clear restores, status-tab-done/open refilter; drawer-delete removes task. Role gating: staff login hides new-task-button, hides drawer-edit-meta and drawer-delete in drawer, status-flip buttons hidden on unassigned tasks. Backend smoke for /api/properties extended fields also verified. Cleanup completed (no TEST_ tasks/users left).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/properties/*", "issue": "All property CRUD endpoints (GET/POST/PUT/DELETE) lack auth dependencies — anyone (no JWT) can list/create/update/delete properties. Stage 6A only protected /api/auth/* and /api/users; same scope-creep risk flagged in iter 7. Recommend adding require_role_dep('admin','manager') to POST/PUT/DELETE /api/properties."},
+      {"endpoint": "GET /api/properties/{id}", "issue": "No single-item GET endpoint exists. Frontend Tasks/Properties code paths rely on the full list response which is fine for 15 props today but won't scale. Consider adding GET /api/properties/{pid} for parity with /api/tasks/{tid}."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard / AnalyticsDashboard (regression)", "issues": ["Recharts emits repeated 'width(-1) and height(-1) of chart should be greater than 0' warnings on /tasks navigation too (parent containers briefly 0-height). Cosmetic only; carried over from iter 7."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stage6b_tasks.py",
+    "/app/test_reports/pytest/stage6b_results.xml"
+  ],
+  "action_items": [
+    "(Security, recommended) Add JWT/role dependency to /api/properties POST/PUT/DELETE — currently anonymous mutations allowed.",
+    "(Nice-to-have) Add GET /api/properties/{id} for single-item fetch (parity with tasks).",
+    "(Optional cosmetic) Silence recharts ResponsiveContainer warnings by giving parent containers an explicit min-height."
+  ],
+  "critical_code_review_comments": [
+    "task_service.py is clean — single source of truth for CATEGORIES/STATUSES/PRIORITIES, visibility_filter encodes staff '$or property_id IN assigned OR assignee_id == me' correctly, can_modify_task/can_update_status enforce the documented RBAC matrix.",
+    "server.py /api/tasks: visibility correctly applied to list/stats; admin/manager-only create/delete via require_role_dep; PUT branch properly restricts staff to status-only on tasks they're assigned to and rejects title/etc with 403; status='done' sets completed_at/by; reverting clears them. Good.",
+    "POST /api/tasks/{id}/photos enforces data:image/ prefix, 1.6MB ceiling (413), 12-photo cap (400) — matches spec.",
+    "GET /api/tasks list correctly strips photo data_urls and exposes photo_count for list-view performance; GET /api/tasks/{id} returns full photo bodies for the drawer.",
+    "/api/users/assignable is correctly projected ({id,name,email,role}) with active:true filter and is open to all authenticated users — verified via staff token.",
+    "Property models extended cleanly with nested OtaListings sub-model; PUT uses model_dump() drop-None pattern which lets partial updates work and round-trips the OTA dict.",
+    "AUTH GAP (carry-over from iter 7): /api/properties and ALL the analytics/segmentation/import/digest/etc endpoints remain unauthenticated server-side. Only /api/auth/*, /api/users, and /api/tasks are JWT-gated. This is consistent across the stage so probably intentional for Stage 6B, but worth confirming with PM before going to production.",
+    "Frontend Tasks.jsx + TaskDrawer.jsx canEdit/canFlipStatus/canManageChecklist/canAttachPhoto/canToggleChecklist matrix mirrors backend RBAC exactly — verified by toggling roles in the UI."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_stage6b_tasks.py (new — 16-test Stage 6B regression suite)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@sourcebench.local / ChangeMe123! (from /app/memory/test_credentials.md). Test mgr+staff users created via /api/users and deleted after each fixture; no leftovers.",
+  "seed_data_creation": "Created and deleted: 1 manager user, 2 staff users, ~8 tasks (incl. RBAC + photo-cap + assigned/unassigned permutations), 1 extended-fields property (TEST_PROP_ext). Final cleanup script confirmed no TEST_ rows remain.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Stage 6B (Tasks + Property extensions) is solid. Backend regression at /app/backend/tests/test_stage6b_tasks.py — re-run with `pytest backend/tests/test_stage6b_tasks.py -v`. Frontend testids on Tasks are all present and stable; the only timing nuance is that the stat-strip tiles render after /api/tasks/stats resolves (wait for stat-total before asserting). TaskDrawer is identical for admin vs manager (canEdit=isMgr) so manager UI was covered by the admin path; staff UI was independently verified. Recommend the main agent (or a future stage) lock down /api/properties mutation endpoints with the same require_role_dep pattern used on /api/tasks.",
+  "rca of the issue": "No defects in Stage 6B itself. The two minor backend notes are scope-boundary observations (auth gating on /api/properties; missing single-item GET) inherited from the iter-7 architecture. Initial Playwright stat-strip 'MISSING' was a script-level race, not an app bug — resolved by waiting for [data-testid=stat-total] before locator counting."
+}

@@ -1,0 +1,53 @@
+{
+  "summary": "Stage 7 (Staff Calendar + Hours + iCal + Team Noticeboard) — full E2E test across all three roles. Backend: NEW pytest suite /app/backend/tests/test_stage7_staff_calendar.py = 49/50 PASS (1 fail = route-ordering bug on team iCal, details below). Coverage: auth sanity, announcements CRUD + dismiss + RBAC + urgent-sort, shifts CRUD + range filter + staff-scope visibility + staff-cannot-create, time-off pending→approve/decline (reason required 400/200), staff-cannot-approve, hours Draft→Submit→Approve + reject reason 400/200 + staff-cannot-approve + summary/CSV manager-only, iCal info/individual feed BEGIN:VCALENDAR + bad token 403 + admin-only rotate (mgr/staff 403, old token stops working, new works), staff profile shape (user, month_hours_approved, open_tasks_count, shifts_this_week, assigned_property_names, pending_timeoff) + staff can see own + cannot see others, regression parametrized over /auth/me + /reservations + /analytics/summary + /tasks + /inventory + /schedules + /reviews + /campaigns + /properties + /users/assignable, staff-blocked-on-reservations. Frontend (Playwright on preview URL): ADMIN flow — Dashboard NoticeboardCard visible; create Normal + Urgent announcement; badge count = 2; dismiss removes; manager can delete both. Sidebar nav-staff-calendar → month grid + New shift + Time off buttons visible for admin. Sidebar nav-staff-hours → summary card + Export CSV + Log hours visible. Profile-link → /staff/{admin_id} → ical-url, ical-copy, ical-rotate all present with feed URL populated. MANAGER flow — sidebar labels 'Staff calendar' / 'Staff hours' (not staff variant), Admin section (Users & roles) HIDDEN, New shift btn visible, Rotate btn HIDDEN. STAFF flow — fresh login redirects to /tasks correctly, sidebar labels 'My calendar' / 'My hours', NoticeboardCard visible on /tasks, new-announcement btn HIDDEN, delete-announcement btn HIDDEN, dismiss btn visible, on /staff/calendar new-shift btn HIDDEN + new-timeoff btn visible, on /staff/hours summary card + export-hours HIDDEN + Log hours visible; staff logs Draft hours → Submit → row shows Submitted; approve/reject buttons NOT visible on own row. Regression pages /tasks, /inventory load with 0 console errors.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/staff/team/ical-info + GET /api/staff/team/ical",
+        "issue": "ROUTE ORDERING BUG. In /app/backend/server.py the dynamic /staff/{staff_id}/ical-info (line 3310) is registered BEFORE the static /staff/team/ical-info (line 3325), and same for /staff/{staff_id}/ical (line 3282) vs /staff/team/ical (line 3297). FastAPI matches in registration order, so `staff_id='team'` shadows the team endpoints. Confirmed: /api/staff/team/ical-info returns 404 'User not found' (from _ensure_ical_token → user lookup for id='team') instead of 200 with the team token. /api/staff/team/ical also gets routed to the individual handler and will only ever return 403 'Invalid token' — the team token check code path is unreachable in production. FIX: move the two /staff/team/... route decorators ABOVE the /staff/{staff_id}/... ones (e.g. put lines 3297 & 3325 before 3282 & 3310).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard (admin)", "issues": ["Pre-existing recharts width(-1)/height(-1) container warnings (documented in iterations 10-12, unchanged) — non-blocking."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stage7_staff_calendar.py",
+    "/app/test_reports/pytest/stage7_results.xml"
+  ],
+  "action_items": [
+    "HIGH: Reorder FastAPI routes in /app/backend/server.py — move /staff/team/ical-info (line 3325) and /staff/team/ical (line 3297) ABOVE /staff/{staff_id}/ical-info (line 3310) and /staff/{staff_id}/ical (line 3282) respectively, so the static 'team' path wins the match. Currently /api/staff/team/ical-info returns 404 and /api/staff/team/ical is unreachable (always 403). This breaks the 'Team iCal subscription' feature end-to-end. Once fixed, re-enable test_team_ical in the pytest suite (it already reflects the intended behaviour)."
+  ],
+  "critical_code_review_comments": [
+    "staff_service.build_ical_feed correctly uses `dtend = end + timedelta(days=1)` for all-day iCal end-date exclusivity — matches RFC 5545.",
+    "hours_service.compute_total_hours returns 0.0 when clock_out <= clock_in — good guard against negative hours. WEEKLY_THRESHOLD=38.0 is hard-coded; consider moving to platform_settings if AU-vs-other geographies matter later.",
+    "hours_service.build_summary counts BOTH 'Submitted' and 'Approved' in totals (see the explicit no-op branch on line 73-74). This is intentional per the code comment but the review request only says 'approved hours' for the KPI — worth confirming spec: the KPI card on the profile page uses 'month_hours_approved' from server.py:3465 which correctly filters status='Approved' only, so the KPI is right; the summary panel shows both. Not a bug, just noting the double semantic.",
+    "server.py _resolve_staff has no filter on `role` — any user id (even admin/manager) can be assigned a shift/hours/time-off entry. That's correct for shift-of-manager scenarios but worth noting.",
+    "POST /api/staff/time-off silently reassigns target=actor.id when actor is staff (server.py:3196-3197). Test verified this — a staff cannot even attempt to create for someone else, request is reinterpreted. Reasonable UX; if strict validation is preferred, return 403.",
+    "iCal token endpoints correctly use _ensure_ical_token / _ensure_team_token to lazily provision on first read. Rotation for individuals is admin-only; there is NO endpoint to rotate the TEAM token — consider adding /api/staff/team/rotate-ical-token (admin-only) for parity.",
+    "Announcements have no 'delete-all' or archive — items just live forever. dismissed_by grows unbounded but that's fine for the intended scale.",
+    "GET /api/staff/hours/summary is manager-only via AUTH_MGR — correct. But GET /api/staff/hours (list) allows staff and correctly scopes to `staff_member_id == actor['id']`. Good.",
+    "The frontend Layout.jsx uses `staffLabel` on staff role only (line 87 & 177) — correct; verified 'My calendar' / 'My hours' render for staff and 'Staff calendar' / 'Staff hours' for manager/admin.",
+    "NoticeboardCard is embedded in both AnalyticsDashboard.jsx and Tasks.jsx, so admin+manager see it on / and staff see it on /tasks — good coverage of role landing pages.",
+    "StaffProfile.jsx correctly gates the ical-rotate button on `user?.role === 'admin'` (line 72). Verified manager does NOT see it."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_stage7_staff_calendar.py (NEW — 50-case pytest suite for Stage 7)"
+  ],
+  "success_rate": {
+    "backend": "49/50 = 98% (1 failure — /staff/team/ical-info route shadowing, HIGH priority)",
+    "frontend": "100% on all Stage 7 flows across admin, manager, staff roles; regression pages /tasks + /inventory clean with 0 console errors"
+  },
+  "test_credentials": "Admin admin@sourcebench.local / ChangeMe123! (from /app/memory/test_credentials.md). CREATED for Stage 7 testing: TEST_stage7_mgr@sourcebench.local / TestPass123! (manager) and TEST_stage7_staff@sourcebench.local / TestPass123! (staff) and TEST_stage7_staff2@sourcebench.local / TestPass123! (staff). These users will persist after the test run; main agent can delete them or leave them for the next iteration.",
+  "seed_data_creation": "Created 3 test users (TEST_stage7_mgr, TEST_stage7_staff, TEST_stage7_staff2). All test-created announcements, shifts, time-off, hours entries were cleaned up via fixture teardown + manual cleanup script. Final DB state: 3 test users remain, 0 stray Stage-7 test data. No seed properties, tasks, or reviews touched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run `pytest /app/backend/tests/test_stage7_staff_calendar.py -v` (~11s, 50 tests). The test_team_ical test WILL fail until the route ordering in server.py:3282-3325 is fixed by moving the two /staff/team/... route decorators ABOVE the /staff/{staff_id}/... ones. Once that trivial move is done, all 50 tests should pass. Test credentials for TEST_stage7_mgr/staff/staff2@sourcebench.local + TestPass123! are available for reuse — the fixture will re-set the password to TestPass123! on each run so idempotent. Frontend has no known Stage 7 bugs; the only outstanding item is the backend route ordering.",
+  "rca of the issue": "The team-iCal 404 is a classic FastAPI/Starlette route-ordering pitfall: when both `@api.get('/staff/{staff_id}/ical-info')` and `@api.get('/staff/team/ical-info')` are registered, whichever is declared FIRST in the source file wins the match. In /app/backend/server.py the dynamic path is declared at line 3310 (individual) and 3282 (individual /ical), and the static team path at line 3325 and 3297 respectively — so ANY GET /api/staff/team/ical-info request is captured by the dynamic handler with `staff_id='team'`, and `_ensure_ical_token('team')` raises 404 because no user has id='team'. Reproduction: `curl <BASE>/api/staff/team/ical-info -H 'Authorization: Bearer <admin>' → 404`. Mitigation: two-line move — reorder the decorators so the static team routes are registered BEFORE the dynamic staff_id routes, or (better) add an explicit path parameter constraint like `@api.get('/staff/{staff_id:uuid}/ical-info')` if staff_id is always a UUID."
+}

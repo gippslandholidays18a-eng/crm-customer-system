@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700&f[]=manrope@300,400,500,600,700&display=swap");
+
+html,
+body,
+#root {
+    background: #090a0e;
+    color: #f2f3f5;
+}
+
+body {
+    margin: 0;
+    font-family: "Manrope", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "ss01", "cv11";
+}
+
+.font-display {
+    font-family: "Satoshi", "Manrope", ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.01em;
+}
+
+@layer base {
+    :root {
+        /* dark-first; we use one palette */
+        --background: 222 14% 5%;
+        --foreground: 220 8% 95%;
+        --card: 224 14% 9%;
+        --card-foreground: 220 8% 95%;
+        --popover: 224 14% 9%;
+        --popover-foreground: 220 8% 95%;
+        --primary: 33 60% 60%;
+        --primary-foreground: 0 0% 8%;
+        --secondary: 222 10% 14%;
+        --secondary-foreground: 220 8% 95%;
+        --muted: 222 10% 14%;
+        --muted-foreground: 220 6% 60%;
+        --accent: 222 10% 14%;
+        --accent-foreground: 220 8% 95%;
+        --destructive: 4 71% 60%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 222 12% 16%;
+        --input: 222 12% 16%;
+        --ring: 33 60% 60%;
+        --radius: 0.5rem;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        @apply bg-background text-foreground;
+    }
+}
+
+/* App-specific surface helpers */
+.surface {
+    background-color: #12141a;
+    border: 1px solid #22252f;
+}
+.surface-hover:hover {
+    background-color: #1a1d24;
+}
+.divider {
+    border-color: #22252f;
+}
+.text-dim {
+    color: #8f95a3;
+}
+.brand {
+    color: #d9a05b;
+}
+.bg-brand {
+    background-color: #d9a05b;
+}
+
+/* Table */
+.tbl-row {
+    border-bottom: 1px solid #1c1f27;
+    transition: background-color 120ms ease;
+}
+.tbl-row:hover {
+    background-color: #15181f;
+}
+
+/* Subtle ambient grid */
+.bg-grid {
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+::-webkit-scrollbar-track {
+    background: #0c0d11;
+}
+::-webkit-scrollbar-thumb {
+    background: #22252f;
+    border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #2c303b;
+}
+
+@layer base {
+    [data-debug-wrapper="true"] {
+        display: contents !important;
+    }
+}

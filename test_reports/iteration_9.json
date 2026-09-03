@@ -1,0 +1,53 @@
+{
+  "summary": "Stage 6C (Compliance & Housekeeping schedules) verified end-to-end against the public preview URL. Backend: 17/17 pytest tests PASS in /app/backend/tests/test_stage6c_schedules.py covering /api/schedules/meta (auth-gated, 6 compliance + 6 housekeeping defaults + default_lead_days=14), GET /api/schedules with items+summary (180 baseline items = 15 props × 12), filters (kind=compliance/housekeeping, property_id, status=overdue), POST/PUT (last_done_at recomputes next_due_at = last+cadence; manual next_due_at also works; cadence/label/notes/active/auto_task_lead_days all updatable), DELETE, POST mark-done (last_done_at=today, next_due_at += cadence, linked_task cleared), POST seed-defaults (inserted+skipped sum to 12), auto-task creation on admin/manager GET when next_due past (priority=urgent, title='{label} — {property_name}', category=schedule.kind, due_date=next_due, schedule_item_id linked, linked_task_id round-trip), bump on PUT /api/tasks status=done with schedule_item_id, bump via fallback (category+subtype+property when schedule_item_id is null), DELETE /api/tasks clears linked_task_id, RBAC (manager full CRUD; staff GET filtered to assigned property; staff POST/PUT/DELETE/mark-done all 403; staff GET does NOT trigger auto-task creation). Stage 6B regression suite (16/16) still passes. Frontend Playwright: /compliance loads (admin) with sum-total=180, sum-compliance=90, sum-housekeeping=90, sum-overdue=0, sum-due-soon=0; all 5 filter testids visible; filter-kind=Compliance narrows to 90, filter-clear restores 180, filter-search='Smoke alarm' narrows to 15; mark-done flow confirmed (toast 'Marked done'). Properties editor: edit-{pid} opens editor, prop-toggle-schedule expands the panel (after fix), schedule-panel-{pid} renders with 12 default rows, schedule-add-custom opens schedule-add-editor, adding fire_extinguisher/365 creates a 13th row, schedule-edit-{sid} -> schedule-edit-save-{sid} persists, schedule-mark-done-{sid} bumps, schedule-delete-{sid} removes. Staff RBAC on frontend: nav-compliance hidden for staff, direct /compliance visit allowed and shows only their 12 schedules with ZERO mark-done buttons. No console errors after the import fix.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/schedules/{id}", "issue": "If only `cadence_days` is updated without re-supplying `last_done_at`, next_due_at is NOT recomputed (only recomputed when last_done_at is present in the payload). May surprise users editing cadence on an already-completed item; recommend recomputing from existing last_done_at when cadence changes."},
+      {"endpoint": "POST /api/schedules", "issue": "subtype uniqueness is not enforced per (property_id, kind, subtype) — duplicates are allowed via custom POST, which makes the fallback bump-by-category+subtype hook ambiguous. Consider a unique index or POST-time check."},
+      {"endpoint": "GET /api/schedules", "issue": "Auto-sync runs on EVERY admin/manager list call (no cooldown), creating tasks synchronously inside the request. Cheap today (180 items) but will scale linearly with property count; consider a TTL-cached flag or background worker once portfolios grow."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Properties.jsx (PropertyEditor)", "issue": "FIXED during this run — `PropertySchedulePanel` was used at line 571 but never imported, causing 'ReferenceError: PropertySchedulePanel is not defined' Uncaught runtime error the instant any property editor expanded the Compliance & Housekeeping schedule section. Added `import PropertySchedulePanel from \"@/components/PropertySchedulePanel\"`. All per-property panel flows now work.", "selector": "[data-testid=\"prop-toggle-schedule\"]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/compliance row Actions column", "issues": ["Mark-done button is shown for admin/manager only; design is fine but the column header still says 'Actions' for staff who see an empty column — consider hiding the column or rendering a status-only column for staff."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stage6c_schedules.py",
+    "/app/test_reports/pytest/stage6c_results.xml",
+    "/app/backend/tests/test_stage6b_tasks.py",
+    "/app/test_reports/pytest/stage6b_results.xml"
+  ],
+  "action_items": [
+    "(Already fixed by this agent) Added missing import for PropertySchedulePanel in /app/frontend/src/pages/Properties.jsx — please verify the fix in your local view and self-test the Properties → schedule panel flow.",
+    "(Nice-to-have) Recompute next_due_at when only cadence_days is updated in PUT /api/schedules/{id} (using existing last_done_at).",
+    "(Nice-to-have) Enforce uniqueness of (property_id, kind, subtype) on POST /api/schedules to keep the fallback bump hook unambiguous.",
+    "(Future) Move /api/schedules auto-sync out of the request path (cron or TTL flag) once portfolio size grows beyond a few hundred items.",
+    "(UX nit) Hide Actions column on /compliance for staff role since no buttons render there."
+  ],
+  "critical_code_review_comments": [
+    "compliance_service.py is well-factored: build_item, status_for_item, needs_task, bump_after_completion, task_priority_for, summarise are pure functions with no DB dependency — easy to unit test. Constants COMPLIANCE_DEFAULTS / HOUSEKEEPING_DEFAULTS / DEFAULT_LEAD_DAYS are explicit and match Stage 6C spec exactly (6 + 6 + 14).",
+    "server.py Stage 6C section follows the same RBAC + Pydantic + uuid + ISO-date pattern as Stage 6B tasks — consistent. Auto-task creation correctly resolves assignee: cleaner_user_id for housekeeping, manager_user_id for compliance, falling back to the other role if missing.",
+    "_maybe_bump_schedule_for_task correctly handles BOTH explicit schedule_item_id and the (category, subtype, property_id) fallback path — verified end-to-end.",
+    "tasks_delete properly clears linked_task_id on the matching schedule_items row using a guarded {id, linked_task_id: tid} filter (avoids clobbering a re-linked task).",
+    "GET /api/schedules excludes _id projection consistently. status enrichment is done in Python rather than the DB query, which is fine for ≤5000 items.",
+    "AUTH GAP (carry-over from iter 7/8): /api/properties, /api/analytics/*, /api/segmentation/*, /api/import/*, /api/digest/* etc. remain unauthenticated. /api/schedules and /api/tasks are correctly JWT-gated. Worth a sweep before production.",
+    "Frontend Properties.jsx had a missed import — likely a copy-paste regression. Recommend adding ESLint `no-undef` to the CI lint step (or running `yarn lint`) to catch this class of bug pre-merge."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_stage6c_schedules.py (new — 17-test Stage 6C regression suite)",
+    "/app/frontend/src/pages/Properties.jsx (bug fix: added missing `import PropertySchedulePanel from \"@/components/PropertySchedulePanel\"`)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@sourcebench.local / ChangeMe123! (from /app/memory/test_credentials.md). Manager + staff users created via /api/users with TEST_ prefix and deleted in fixture teardown.",
+  "seed_data_creation": "Created and cleaned up: 1 manager + 2 staff users, ~8 custom schedule_items with TEST_ subtypes (overdue/CRUD/fallback/mark-done/no-sync permutations), ~5 tasks linked to those schedules. All cleaned by autouse module-scope fixture + final teardown. The 180 production schedule_items and 15 properties were NOT modified.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Stage 6C is solid after the one frontend import fix. Backend regression: `pytest backend/tests/test_stage6c_schedules.py -v` (17 tests, ~7s). The `test_delete_task_clears_linked` test deliberately sets schedule.active=false before deleting the task — otherwise the subsequent GET re-triggers auto-sync and immediately re-links a brand new task. /api/properties returns `{items: [...]}` not a bare list — important for any future test that consumes it. Auto-task creation only runs for admin/manager GETs (staff GET does NOT — confirmed). The 180-item baseline assumption depends on Stage 6B's 15 seeded properties remaining intact.",
+  "rca of the issue": "Frontend ReferenceError: PropertySchedulePanel is not defined — Properties.jsx references the component at line 571 inside the PropertyEditor but never imports it. The component file /app/frontend/src/components/PropertySchedulePanel.jsx exists and exports default. Repro: log in as admin → /properties → click any edit-{pid} → expand prop-toggle-schedule → Uncaught runtime error overlay appears. Mitigation: added `import PropertySchedulePanel from \"@/components/PropertySchedulePanel\";` after the lucide-react import line. Re-tested end-to-end (add/edit-save/mark-done/delete) — all flows work, zero console errors."
+}

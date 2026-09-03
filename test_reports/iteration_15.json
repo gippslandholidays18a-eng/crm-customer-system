@@ -1,0 +1,59 @@
+{
+  "summary": "Stage 9.5 (pricing intelligence) tested end-to-end. Backend: 24/27 new tests pass; 3 failures reveal real spec deviations. Regression: 99/99 Stage 7+8 tests pass. Frontend: /pricing renders PricingIntelligence with forecast chart, 200 rec cards, elasticity table, refresh buttons all working; notification bell present; Stages 1-8 pages load without pageerrors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/pricing/recommendations",
+        "issue": "Spec says 50–80% occupancy → MAINTAIN_RATE + alert_severity='info', but backend returns 'none' for MAINTAIN recs. In rate_recommendation_service._alert(), the 'healthy' reason_key returns None, causing alert_severity to be set to 'none' instead of 'info'. Fix: return an alert dict with severity='info' for the healthy branch, OR change _decide's severity mapping to be authoritative regardless of _alert() output."
+      },
+      {
+        "endpoint": "POST /api/pricing/recommendations/refresh",
+        "issue": "Response field 'alerts_emitted' does not count newly-emitted notifications — it counts every property with a critical/warning/success rec, even when dedup skipped the insert. In server.py the dedup branch does `notified.add(pid); continue` before the insert branch that also does `notified.add(pid)`. On repeated refresh calls the same day, no new notifications are inserted (DB dedup works) but 'alerts_emitted' still reports the full property count, misleading the API consumer. Fix: use a separate counter incremented only after `db.notifications.insert_one(...)`."
+      },
+      {
+        "endpoint": "POST /api/pricing/recommendations/{id}/apply",
+        "issue": "Spec says: 'If no base_rate exists yet, returns 400 with \"No base rate set\"'. In practice, when no pricing_calendar cell exists AND the rec's current_rate is 0, the service short-circuits earlier with 'No suggested rate to apply' (because suggested_rate = current_rate * (1+adj) = 0). Only when suggested_rate is somehow non-zero does the 'No base rate set' branch actually fire. Consider reordering the base-rate check ahead of the suggested-rate check so the error message matches the spec."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "/pricing → Revenue intelligence",
+        "issues": [
+          "Recharts logs many 'width(-1) and height(-1) of chart should be greater than 0' warnings on first render. Non-blocking (chart renders correctly after container is measured), but noisy. Consider giving ResponsiveContainer an explicit min-height or wrapping in a sized div."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stage9_5.py",
+    "/app/test_reports/pytest/stage9_5.xml"
+  ],
+  "action_items": [
+    "Set alert_severity='info' (not 'none') for MAINTAIN_RATE / healthy recommendations to match spec and frontend severity filter.",
+    "Fix 'alerts_emitted' in /pricing/recommendations/refresh to reflect newly-inserted notifications only (currently double-counts dedup hits).",
+    "Reorder base-rate vs suggested-rate checks in rate_recommendation_service.apply_to_pricing so 'No base rate set' fires as the spec describes when pricing_calendar has no cell.",
+    "(Cosmetic) Fix recharts container sizing warnings on /pricing forecast chart."
+  ],
+  "critical_code_review_comments": [
+    "rate_recommendation_service._alert() returns None for the 'healthy' branch, but rate_recommendation_service.refresh_recommendations then coerces alert_severity to the string 'none' — contradicts the spec that MAINTAIN_RATE has severity 'info'.",
+    "server.py Stage 9.5 refresh endpoint conflates 'notified' (dedup guard set) with the 'alerts_emitted' count — the same set is used for both, so the returned count is not the number of new alerts.",
+    "rate_recommendation_service.apply_to_pricing has an ordering issue: the suggested_rate==0 short-circuit fires before the base_rate check, so the specified 'No base rate set' error is unreachable in the common case (pricing_calendar missing → current_rate=0 → suggested=0).",
+    "occupancy_forecast_service builds a `q` dict on line 154 that is never used (dead code) — the actual filtering is done via property_ids loop. Cosmetic.",
+    "rate_recommendation_service.apply_to_pricing line 232 concatenates notes strings using `+ ' (auto: rate rec)'` chained with `or ''` — operator precedence gives `(price.notes if price else '') or '' + ' (auto: rate rec)'`, which means when notes is truthy the ' (auto: rate rec)' suffix is silently lost. Wrap with explicit parentheses."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_stage9_5.py (new)"
+  ],
+  "success_rate": {"backend": "89% (24/27 stage 9.5) + 100% (99/99 stage 7-8 regression)", "frontend": "100% smoke"},
+  "test_credentials": "admin@sourcebench.local/ChangeMe123!, TEST_stage7_mgr@sourcebench.local/TestPass123!, TEST_stage7_staff@sourcebench.local/TestPass123!",
+  "seed_data_creation": "Two RoomMaster webhook reservations created (TEST-S95-* and TEST-WH-*) on the first property to produce non-zero occupancy for the forecast/recommendation tests. One pricing_calendar cell at today+10 days on first property (base 200, mult 1.0) for the apply-success test.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend Stage 9.5 endpoints, RBAC, forecast/rec shapes, webhook-triggered refresh, dismiss+apply flow all work. Focus retest on: (1) MAINTAIN_RATE severity='info', (2) alerts_emitted new-count semantics, (3) apply endpoint 'No base rate set' ordering. Frontend renders 200 rec cards across 15 properties; occupancy in the sample env is ~2% (mostly Critical) because only a couple of reservations fall inside the 30-day window.",
+  "rca of the issue": "See critical_code_review_comments — three distinct minor bugs isolated to rate_recommendation_service.py and the Stage 9.5 refresh endpoint block in server.py."
+}
